@@ -6,62 +6,73 @@ clear
 %tbxmanager savepath
 yalmip('clear');
 % Loading data (loads)
-load dati.mat
+load dati_new.mat
 
 Ng=3; %Number of power plants
-Nt=3; %Number of thermic plants
-Nl=1; %Number of loads
-Nlt=1; %Number of thermic loads
+Nt=2; %Number of thermic plants
+Nl=4; %Number of loads
+Nlt=4; %Number of thermic loads
 Nls=1; %Number of shiftable loads
 % cost function alpha and beta coefficients
-betagrid=prezzi_medi;
-alpha1= 0.0021/1000; beta1=34.4/1000;      % 
-alpha2=(0.042/1000); beta2= (25.78/1000);  % 
-alpha3= 0; beta3=1e-4;     % 
+betagrid=prezzi_medi(:,2);
+alpha1= 0.026; beta1=0.2;      % 
+alpha2=0.0446; beta2=2.6;  % 
+alpha3=0.018; beta3=0.55;     % 
 alpha=diag([alpha1;alpha2;alpha3]);
 beta=[beta1;beta2;beta3];
 
+% PV
+PV=zeros(24,1);
+
+% Wind
+Wind=zeros(24,1);
+
+%Csp_input
+Csp_input=Csp_input; %vedi dati_new.mat
+
 % cost function alpha and beta coefficients
-alphaT=diag([alpha1;alpha2;alpha3]);
-betaT=[beta1;beta2;beta3];
+alphaT=0.069;
+betaT=3.6;
 
 % L is an array (Nl,24)
-L=Potenze_attive_carico.';
+L=hotel(:,1)+ospedale(:,1)+ufficio(:,1)+residenziale(:,1);
+%L=Potenze_attive_carico.';
 % Thermic load
-LT=Potenze_termiche.';
+%LT=Potenze_termiche.';
+LT=hotel(:,2)+ospedale(:,2)+ufficio(:,2)+residenziale(:,2);
 % LS is the array of shiftable loads (Nls,1)
-LS =200;
+LS = 0;
 % Constraints on co-generators power
-Gmax=repmat([10000;100;1000],1,24);
-Gmin=repmat([0;100;-1000],1,24);
+Gmax=repmat([100;150;80],1,24);
+Gmin=repmat([0;-150;0],1,24);
 Gridmax=repmat(10000,1,24);
 Gridmin=repmat(-10000,1,24);
 
 % Constraints on thermic power to electric grid
-THEmax=repmat([10000;100;1000],1,24);
-THEmin=repmat([0;0;0],1,24);
+THEmax=repmat([5000],1,24);
+THEmin=repmat([0],1,24);
 % Constraints on thermic power to thermic grid
-THTmax=repmat([10000;100;1000],1,24);
-THTmin=repmat([0;0;0],1,24);
+THTmax=repmat([5000],1,24);
+THTmin=repmat([0],1,24);
 
-HH=[0;0;1]; %Capacity storage (0-inactive, 1-active)
-HHT=[1;1;1]; %Thermic Capacity storage (0-inactive, 1-active)
+HH=[0;1;0]; %Capacity storage (0-inactive, 1-active)
+HHT=[0;1]; %Thermic Capacity storage (0-inactive, 1-active)
 
 E0=[0;0;0]; %Initial condition on capacity storage (energy)
-Emax=[0;0;10000]; %Maximum capacity storage
-ETH0=1e8*[1;1;1]; %Initial condition on thermic capacity storage (energy)
-ETHmax=1e8*[1;1;1]; %Maximum thermic capacity storage
+Emax=[0;150;0]; %Maximum capacity storage
+ETH0=1e8*[0;1]; %Initial condition on thermic capacity storage (energy)
+ETHmax=2e3*[0;1]; %Maximum thermic capacity storage
 
 %Design variables
 act=binvar(Nls,24);
 G=sdpvar(Ng,24); %electric power
 Grid=sdpvar(1,24); %Grid electric power
 E=sdpvar(Ng,24); %capacity storage
-THE=sdpvar(Ng,24); %thermic power
-THT=sdpvar(Ng,24); %thermic power
-ETH=sdpvar(Ng,24); %thermic storage
-etaT=[1;0;0]; %thermic coefficient (thermic -> thermic)
-etaE=[0;0;0.9]; %thermic coefficient (thermic -> electric)
+THE=sdpvar(1,24); %Csp thermic power
+THT=sdpvar(1,24); %Csp thermic power
+ETH=sdpvar(Nt,24); %thermic storage
+etaT=[1]; %thermic coefficient (thermic -> thermic)
+etaE=[0.38]; %thermic coefficient (thermic -> electric)
 constraints=[];
 %Constraints on shiftable loads:
 %act is a matrix of binary design variables {0,1} to indicate the time of
@@ -91,8 +102,10 @@ for i=1:24
     constraints=[constraints;THT(:,i)<=THTmax(:,i);THT(:,i)>=THTmin(:,i)];
     constraints=[constraints;THE(:,i)<=THEmax(:,i);THE(:,i)>=THEmin(:,i)];
     %Equality constraint
-    constraints=[constraints;sum(G(:,i))+Grid(1,i)+sum(etaE.*THE(:,i))==sum(L(:,i))+sum(act(:,i).*LS)];
-    constraints=[constraints;sum(etaT.*THT(:,i))==sum(LT(:,i))];
+    constraints=[constraints;sum(G(:,i))+Grid(1,i)+sum(etaE.*THE(:,i))+PV(i)+Wind(i)==sum(L(i))+sum(act(:,i).*LS)];
+    constraints=[constraints;sum(etaT.*THT(:,i))==sum(LT(i))];
+    %Csp
+    constraints=[constraints;sum(etaT.*THT(:,i))+sum(etaE.*THE(:,i))==Csp_input(i)];
     %Objective function
     J=J+G(:,i).'*alpha*G(:,i)+beta'*G(:,i)+betagrid(i)*Grid(1,i)+...
         (THT(:,i)+THE(:,i)).'*alphaT*(THT(:,i)+THE(:,i))+betaT'*(THT(:,i)+THE(:,i));
@@ -120,3 +133,24 @@ THEres=res{5};
 ETHres=res{6};
 Jres=res{7};
 act_res=res{8};
+%% for Simulink FromWorkspace blocks
+time=3600*[0 1 1 2 2 3 3 4 4 5 5 6 6 7 7 8 8 9 9 10 10 11 11 12 12 13 13 14 14 15 15 16 16 17 17 18 18 19 19 20 20 21 21 22 22 23 23 24];
+time1=[1 1 2 2 3 3 4 4 5 5 6 6 7 7 8 8 9 9 10 10 11 11 12 12 13 13 14 14 15 15 16 16 17 17 18 18 19 19 20 20 21 21 22 22 23 23 24 24];
+Gres_time.time=time;
+Gres_time.signals.values=Gres(:,time1).';
+Gres_time.signals.dimensions=size(Gres,1);
+Gridres_time.time=time;
+Gridres_time.signals.values=Gridres(:,time1).';
+Gridres_time.signals.dimensions=size(Gridres,1);
+Eres_time.time=time;
+Eres_time.signals.values=Eres(:,time1).';
+Eres_time.signals.dimensions=size(Eres,1);
+THTres_time.time=time;
+THTres_time.signals.values=THTres(:,time1).';
+THTres_time.signals.dimensions=size(THTres,1);
+THEres_time.time=time;
+THEres_time.signals.values=THEres(:,time1).';
+THEres_time.signals.dimensions=size(THEres,1);
+ETHres_time.time=time;
+ETHres_time.signals.values=ETHres(:,time1).';
+ETHres_time.signals.dimensions=size(ETHres,1);
