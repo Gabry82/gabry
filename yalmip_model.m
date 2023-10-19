@@ -9,7 +9,7 @@ yalmip('clear');
 load dati_new.mat
 
 Ng=3; %Number of power plants
-Nt=2; %Number of thermic plants
+Nt=1; %Number of thermic plants
 Nl=4; %Number of loads
 Nlt=4; %Number of thermic loads
 Nls=1; %Number of shiftable loads
@@ -28,7 +28,7 @@ PV=zeros(24,1);
 Wind=zeros(24,1);
 
 %Csp_input
-Csp_input=Csp_input; %vedi dati_new.mat
+Csp_input=Csp_input*1e3+2000; %vedi dati_new.mat
 
 % cost function alpha and beta coefficients
 alphaT=0.069;
@@ -56,12 +56,12 @@ THTmax=repmat([5000],1,24);
 THTmin=repmat([0],1,24);
 
 HH=[0;1;0]; %Capacity storage (0-inactive, 1-active)
-HHT=[0;1]; %Thermic Capacity storage (0-inactive, 1-active)
+HHT=[0]; %Thermic Capacity storage (0-inactive, 1-active)
 
 E0=[0;0;0]; %Initial condition on capacity storage (energy)
 Emax=[0;150;0]; %Maximum capacity storage
-ETH0=1e8*[0;1]; %Initial condition on thermic capacity storage (energy)
-ETHmax=2e3*[0;1]; %Maximum thermic capacity storage
+ETH0=1e8*[1]; %Initial condition on thermic capacity storage (energy)
+ETHmax=1e10*[1]; %Maximum thermic capacity storage
 
 %Design variables
 act=binvar(Nls,24);
@@ -90,11 +90,11 @@ for i=1:24
         constraints=[constraints;E(:,i+1)==E(:,i)-HH.*G(:,i)]; 
         constraints=[constraints;ETH(:,i+1)==ETH(:,i)-HHT.*(THE(:,i)+THT(:,i))]; 
         %Constraints on maximum and minimum capacity storage
-        constraints=[constraints;HH.*E(:,i+1)>=0;HH.*E(:,i+1)<=Emax];
-        constraints=[constraints;HHT.*ETH(:,i+1)>=0;HHT.*ETH(:,i+1)<=ETHmax];
+        constraints=[constraints;E(:,i+1)>=0;E(:,i+1)<=HH.*Emax];
+        constraints=[constraints;HHT.*ETH(:,i+1)>=0;HHT.*ETH(:,i+1)<=HHT.*ETHmax];
     else
         %Constraint to unload the capacity storage at 24th hour
-        constraints=[constraints;E(:,24)==0];
+        %constraints=[constraints;E(:,24)==0];
     end
     %Constraint on co-generator power (minimum and maximum)
     constraints=[constraints;G(:,i)<=Gmax(:,i);G(:,i)>=Gmin(:,i)];
@@ -103,9 +103,9 @@ for i=1:24
     constraints=[constraints;THE(:,i)<=THEmax(:,i);THE(:,i)>=THEmin(:,i)];
     %Equality constraint
     constraints=[constraints;sum(G(:,i))+Grid(1,i)+sum(etaE.*THE(:,i))+PV(i)+Wind(i)==sum(L(i))+sum(act(:,i).*LS)];
-    constraints=[constraints;sum(etaT.*THT(:,i))==sum(LT(i))];
+    constraints=[constraints;sum(etaT.*THT(:,i))==LT(i)];%+1e-2;sum(etaT.*THT(:,i))>=LT(i)-1e-2];
     %Csp
-    constraints=[constraints;sum(etaT.*THT(:,i))+sum(etaE.*THE(:,i))==Csp_input(i)];
+    constraints=[constraints;sum(THT(:,i))+sum(THE(:,i))<=Csp_input(i)];
     %Objective function
     J=J+G(:,i).'*alpha*G(:,i)+beta'*G(:,i)+betagrid(i)*Grid(1,i)+...
         (THT(:,i)+THE(:,i)).'*alphaT*(THT(:,i)+THE(:,i))+betaT'*(THT(:,i)+THE(:,i));
